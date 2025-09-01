@@ -1,0 +1,15 @@
+{
+  "blacklist": [
+    "fuck",
+    "shit",
+    "bitch",
+    "asshole",
+    "fucker"
+  ],
+  "whitelist": [
+    "heck",
+    "darn",
+    "butt",
+    "ass"
+  ]
+}
