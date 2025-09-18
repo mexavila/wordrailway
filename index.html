@@ -20,6 +20,12 @@
             </div>
             <div class="card-body">
                 <p class="card-text">Write a phrase or word to analyze it. The system will use an LLM to evaluate it, considering a custom blacklist and whitelist from a local JSON file.</p>
+                <div class="form-check form-switch mb-3">
+                    <input class="form-check-input" type="checkbox" role="switch" id="evaluationModeSwitch" checked>
+                    <label class="form-check-label" for="evaluationModeSwitch">
+                        <strong>Modo IA (LLM)</strong> <small class="text-muted">(Análisis contextual avanzado)</small>
+                    </label>
+                </div>
                 <div class="mb-3">
                     <textarea id="textToEvaluate" class="form-control" rows="4" placeholder="Write something here... e.g., 'You are an excellent person, but sometimes you talk nonsense.'"></textarea>
                 </div>

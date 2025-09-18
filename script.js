@@ -1,11 +1,13 @@
-// script.js (versión para servidor)
+// script.js (versión completa con doble modo de evaluación)
 
 document.addEventListener('DOMContentLoaded', () => {
-    const API_KEY = 'AIzaSyDu1CdA9mdrd04RujBHvj6NSuAjLkDnIp0'; // 👈 ¡IMPORTANTE!
+    // --- CONFIGURACIÓN ---
+    // ⬇️ ¡IMPORTANTE! Reemplaza con tu API Key. No la dejes visible en un repositorio público.
+    const API_KEY = 'TU_API_KEY_AQUÍ';
     const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${API_KEY}`;
     const SERVER_API_URL = 'https://words-production-376a.up.railway.app/api';
 
-    // ... (El resto de los selectores del DOM son los mismos) ...
+    // --- SELECTORES DEL DOM ---
     const evaluateButton = document.getElementById('evaluateButton');
     const textToEvaluate = document.getElementById('textToEvaluate');
     const resultsDiv = document.getElementById('results');
@@ -13,8 +15,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const isValidSpan = document.getElementById('isValid');
     const profanityScoreSpan = document.getElementById('profanityScore');
     const viewReportButton = document.getElementById('viewReportButton');
-    const reportContent = document.getElementById('reportContent');
     const reportModalBody = document.querySelector('#reportModal .modal-body');
+    const modeSwitch = document.getElementById('evaluationModeSwitch');
+    const modeSwitchLabel = document.querySelector('label[for="evaluationModeSwitch"]');
 
     let blacklist = [];
     let whitelist = [];
@@ -47,7 +50,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
     
-    // El renderizado es visual, no necesita cambios
     const renderLists = () => {
         const blacklistUl = document.getElementById('blacklist');
         const whitelistUl = document.getElementById('whitelist');
@@ -71,7 +73,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!list.includes(word)) {
                     list.push(word);
                     renderLists();
-                    saveListsToServer(); // Guardar cambios en el servidor
+                    saveListsToServer();
                 }
                 input.value = '';
             }
@@ -83,21 +85,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 whitelist = whitelist.filter(word => word !== wordToDelete);
             }
             renderLists();
-            saveListsToServer(); // Guardar cambios en el servidor
+            saveListsToServer();
         }
     };
 
-    document.getElementById('addBlacklistWord').addEventListener('click', () => window.app.addWord('blacklist', 'newBlacklistWord'));
-    document.getElementById('addWhitelistWord').addEventListener('click', () => window.app.addWord('whitelist', 'newWhitelistWord'));
-    
-    // --- LÓGICA DE LOG CONECTADA AL SERVIDOR ---
+    // --- LÓGICA DE LOG ---
 
-    const logEvaluationToServer = async (text, result) => {
+    const logEvaluationToServer = async (text, result, mode) => {
         try {
             await fetch(`${SERVER_API_URL}/log`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text, result }),
+                body: JSON.stringify({ text, result, mode }), // Se incluye el modo en el log
             });
         } catch (error) {
             console.error("Error sending log to server:", error);
@@ -108,17 +107,16 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const response = await fetch(`${SERVER_API_URL}/log`);
             const reportText = await response.text();
-			reportModalBody.style.whiteSpace = 'pre-wrap';
+            reportModalBody.style.whiteSpace = 'pre-wrap';
             reportModalBody.textContent = reportText;
         } catch (error) {
             console.error("Error fetching report:", error);
             reportModalBody.textContent = "Error loading report.";
         }
     };
-
-    viewReportButton.addEventListener('click', fetchAndShowReport);
     
-    // --- LÓGICA DE EVALUACIÓN CON LLM (SIN CAMBIOS GRANDES) ---
+    // --- LÓGICA PRINCIPAL DE EVALUACIÓN ---
+
     const evaluateText = async () => {
         const text = textToEvaluate.value;
         if (!text.trim()) {
@@ -126,6 +124,59 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         setLoading(true);
+
+        let result;
+        const evaluationMode = modeSwitch.checked ? 'LLM' : 'Rules';
+
+        try {
+            if (evaluationMode === 'LLM') {
+                result = await evaluateWithLLM(text);
+            } else {
+                result = evaluateWithRules(text);
+            }
+            displayResults(result);
+            logEvaluationToServer(text, result, evaluationMode);
+        } catch (error) {
+            console.error(`Evaluation Error (${evaluationMode}):`, error);
+            alert(`An error occurred during evaluation with ${evaluationMode} mode.`);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    // NUEVA FUNCIÓN: Evaluación local basada en reglas
+    const evaluateWithRules = (text) => {
+        const textLower = text.toLowerCase();
+        let isInvalid = false;
+        let censoredText = text;
+        const foundProfanities = new Set(); 
+
+        blacklist.forEach(word => {
+            const wordLower = word.toLowerCase();
+            if (whitelist.includes(wordLower)) {
+                return; 
+            }
+            const regex = new RegExp(`\\b${wordLower}\\b`, 'gi');
+            if (regex.test(textLower)) {
+                isInvalid = true;
+                foundProfanities.add(wordLower);
+            }
+        });
+
+        foundProfanities.forEach(profanity => {
+            const regex = new RegExp(profanity, 'gi');
+            censoredText = censoredText.replace(regex, match => '*'.repeat(match.length));
+        });
+
+        return {
+            isValid: !isInvalid,
+            profanityScore: isInvalid ? 4 : 0,
+            censoredText: censoredText,
+        };
+    };
+
+    // LÓGICA DE EVALUACIÓN CON LLM
+    const evaluateWithLLM = async (text) => {
         const prompt = `
             You are a content moderation expert. Your task is to analyze the following text and determine its profanity level.
             You must follow these rules strictly:
@@ -150,33 +201,25 @@ document.addEventListener('DOMContentLoaded', () => {
               "censoredText": "string"
             }
         `;
-
-
-        try {
-            const response = await fetch(GEMINI_API_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
-            });
-            if (!response.ok) throw new Error(`API Error: ${response.statusText}`);
-            const data = await response.json();
-            let jsonString = data.candidates[0].content.parts[0].text;
-            const startIndex = jsonString.indexOf('{');
-            const endIndex = jsonString.lastIndexOf('}');
-            if (startIndex !== -1 && endIndex !== -1) {
-                jsonString = jsonString.substring(startIndex, endIndex + 1);
-            }
-            const result = JSON.parse(jsonString);
-            displayResults(result);
-            logEvaluationToServer(text, result); // ¡Aquí guardamos el log!
-        } catch (error) {
-            console.error('Evaluation Error:', error);
-        } finally {
-            setLoading(false);
+        
+        const response = await fetch(GEMINI_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+        });
+        if (!response.ok) throw new Error(`API Error: ${response.statusText}`);
+        const data = await response.json();
+        let jsonString = data.candidates[0].content.parts[0].text;
+        const startIndex = jsonString.indexOf('{');
+        const endIndex = jsonString.lastIndexOf('}');
+        if (startIndex !== -1 && endIndex !== -1) {
+            jsonString = jsonString.substring(startIndex, endIndex + 1);
         }
+        return JSON.parse(jsonString);
     };
 
-    // ... (El resto de las funciones como displayResults, setLoading, etc., son las mismas de antes)
+    // --- FUNCIONES AUXILIARES DE UI ---
+
     const displayResults = (result) => {
         censoredTextSpan.innerHTML = result.censoredText;
         isValidSpan.textContent = result.isValid ? 'Yes 👍' : 'No 👎';
@@ -188,12 +231,28 @@ document.addEventListener('DOMContentLoaded', () => {
         profanityScoreSpan.className = `badge ${scoreColor}`;
         resultsDiv.style.display = 'block';
     };
+    
     const setLoading = (isLoading) => {
         const buttonText = isLoading ? 'Evaluating...' : 'Evaluate Text';
         evaluateButton.disabled = isLoading;
         evaluateButton.innerHTML = isLoading ? `<span class="spinner-border spinner-border-sm" role="status" aria-hidden="true"></span> ${buttonText}` : buttonText;
     };
-    
+
+    // --- EVENT LISTENERS ---
+
     evaluateButton.addEventListener('click', evaluateText);
-    loadListsFromServer(); // Cargar las listas al iniciar
+    viewReportButton.addEventListener('click', fetchAndShowReport);
+    document.getElementById('addBlacklistWord').addEventListener('click', () => window.app.addWord('blacklist', 'newBlacklistWord'));
+    document.getElementById('addWhitelistWord').addEventListener('click', () => window.app.addWord('whitelist', 'newWhitelistWord'));
+    
+    modeSwitch.addEventListener('change', () => {
+        if (modeSwitch.checked) {
+            modeSwitchLabel.innerHTML = `<strong>Modo IA (LLM)</strong> <small class="text-muted">(Análisis contextual avanzado)</small>`;
+        } else {
+            modeSwitchLabel.innerHTML = `<strong>Modo Reglas</strong> <small class="text-muted">(Validación local rápida y gratuita)</small>`;
+        }
+    });
+
+    // --- INICIALIZACIÓN ---
+    loadListsFromServer();
 });
