@@ -3,7 +3,7 @@
 document.addEventListener('DOMContentLoaded', () => {
     // --- CONFIGURACIÓN ---
     // ⬇️ ¡IMPORTANTE! Reemplaza con tu API Key. No la dejes visible en un repositorio público.
-    const API_KEY = 'TU_API_KEY_AQUÍ';
+    const API_KEY = 'AIzaSyDu1CdA9mdrd04RujBHvj6NSuAjLkDnIp0';
     const GEMINI_API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${API_KEY}`;
     const SERVER_API_URL = 'https://words-production-376a.up.railway.app/api';
 
